@@ -1,3 +1,10 @@
+'''
+Author: Chifred
+Date: 2023-09-28 08:42:16
+LastEditTime: 2023-10-24 15:14:58
+Editors: Chifred
+Description: TODO
+'''
 # Configuration file for the Sphinx documentation builder.
 #
 # This file only contains a selection of the most common options. For a full
@@ -49,7 +56,7 @@ master_doc = 'index'
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = 'en'
+language = 'zh_CN'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.

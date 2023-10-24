@@ -38,6 +38,13 @@ RKNPU SDK Documentation
 
 
 .. toctree::
+  :maxdepth: 2
+  :caption: RKNN进阶使用说明
+
+  RKNN_Advanced_Features/dynamic_shape/dynamic_shape
+  RKNN_Advanced_Features/custom_op/custom_op
+
+.. toctree::
   :maxdepth: 1
   :caption: API说明
 
