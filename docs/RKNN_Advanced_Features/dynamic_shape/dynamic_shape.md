@@ -48,7 +48,7 @@ dynamic_input中的shape与原始模型框架的layout一致，例如，对于�
 ## C API部署
 得到动态shapeRKNN模型后，接下来开始使用RKNPU C API进行部署。按照接口形式，分为通用API和零拷贝API流程。
 
-### 通用API
+### 一、通用API
 
 加载动态形状输入RKNN模型后，可以在运行时动态修改输入的形状。首先，通过rknn_query可以查询RKNN模型支持的输入形状列表,每个输入支持的形状列表信息以rknn_input_range结构体形式返回，它包含了每个输入的名称、数据布局信息、形状个数以及具体形状。接着，通过调用rknn_set_input_shapes接口，传入包含每个输入形状信息的rknn_tensor_attr数组指针可以设置当前推理使用的形状。在设置输入形状后，可以再次调用rknn_query查询当前设置成功后的输入和输出形状。
 最后，按照通用API流程完成推理。每次切换输入形状时，需要再设置一次新的形状，准备新形状大小的数据并再次调用rknn_inputs_set接口。如果推理前不需要切换输入形状，无需重复调用rknn_set_input_shapes接口。调用流程如下图所示：
@@ -214,7 +214,7 @@ dynamic_input中的shape与原始模型框架的layout一致，例如，对于�
 ```
 
 
-### 零拷贝接口
+### 二、零拷贝API
 
 对于零拷贝API而言，初始化成功后，通过rknn_query可以查询RKNN模型支持的输入形状列表，调用rknn_create_mem接口分配**最大形状**的输入和输出内存。接着，通过调用rknn_set_input_shapes接口，传入包含每个输入形状信息的rknn_tensor_attr数组指针可以设置当前推理使用的形状。在设置输入形状后，可以再次调用rknn_query查询设置成功后的输入和输出形状。最后，调用rknn_set_io_mem接口设置需要的输入输出内存。每次切换输入形状时，需要再设置一次新的形状，准备新形状大小的数据并再次调用rknn_set_io_mem接口，如果推理前不需要切换输入形状，无需重复调用rknn_set_input_shapes接口。典型用法流程如下图所示：
 
