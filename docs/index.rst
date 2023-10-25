@@ -9,32 +9,37 @@ RKNPU SDK Documentation
 
 .. toctree::
   :maxdepth: 1
-  :caption: 介绍
+  :caption: RKNN简介
 
   introduction/introduction
 
 
 .. toctree::
   :maxdepth: 1
-  :caption: 安装环境
+  :caption: 开发环境准备
 
   enviromnet/environment
 
 
 .. toctree::
   :maxdepth: 1
-  :caption: 快速开始
+  :caption: 算子支持列表
 
-  quick_start/support_op_list
+  op_support_list/op_support_list
 
 
 
 .. toctree::
   :maxdepth: 1
-  :caption: 使用指南
+  :caption: RKNN使用说明
 
-  user_guides/deploy/deploy
-  user_guides/model_convert/model_convert
+  RKNN_User_Guide/matmul_api/matmul_api
+
+.. toctree::
+  :maxdepth: 1
+  :caption: 示例
+
+  demo_guide/examples
 
 
 .. toctree::
@@ -46,16 +51,33 @@ RKNPU SDK Documentation
 
 .. toctree::
   :maxdepth: 1
-  :caption: API说明
-
-  api_reference/APIs
+  :caption: 量化说明
 
 
 .. toctree::
   :maxdepth: 1
-  :caption: 部署示例
+  :caption: 精度排查
 
-  demo_guides/examples
+
+.. toctree::
+  :maxdepth: 1
+  :caption: 模型性能优化
+
+
+.. toctree::
+  :maxdepth: 1
+  :caption: 内存占用优化
+
+.. toctree::
+  :maxdepth: 1
+  :caption: 模型设计建议
+
+
+.. toctree::
+  :maxdepth: 1
+  :caption: API说明
+
+  api_reference/APIs
 
 
 .. toctree::
