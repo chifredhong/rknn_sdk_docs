@@ -4,16 +4,18 @@
 ## 整体流程介绍
 ![](../..//images/custom_op_registration_process.jpg)
 
-1. 准备onnx模型: 按照自定义算子ONNX spec规范, 开发者设计自定义算子的类型、名字、 属性、输入/输出数量,并将该算子插入到onnx中的拓扑图位置，此过程开发者需要使用onnx包提供的api来修改和导出onnx模型。
-2. 实现自定义算子Python类, 类里包括shape_infer和compute两个成员函数, 并调用Toolkit2的api注册该算子。
-3. Toolkit2仿真调试通过后,转换并生成rknn模型。
-4. 加载rknn模型，初始化模型上下文，然后，创建自定义算子的上下文，设置自定义算子结构体，完成结构体的初始化、预处理、推理、销毁各个阶段的回调函数实现,其中推理回调函数是必须由客户填充, 最后, 调用自定义算子API注册四个回调函数和算子信息。
-5. 上板调试,回调函数调试通过后，开启模型详细日志和Dump功能确认完整模型的正确性。
+1. 准备onnx模型: 按照自定义算子ONNX spec规范, 用户设计自定义算子的op类型,名字, op属性,输入/输出数量,并将该算子插入到onnx中的拓扑图位置，用户使用onnx包提供的api设计和导出onnx模型
+2. 实现自定义算子Python类, 类里主要包括shape_infer和compute两个函数, 并调用toolkit2的api注册该算子
+3. Toolkit2仿真调试,转换并生成rknn模型
+4. 在部署时，有两种注册自定义算子的方式：一种是App程序直接调用RKNN 自定义算子C API的方式，另一种是插件库的方式，即用户开发调试完成，已经编译成动态库后，从特定目录dlopen动态库并并调用特定的注册函数，前者方便开发验证算子正确性，后者用于连板调试
+5. API的调用流程是，先加载rknn模型，初始化模型上下文，然后创建自定义算子的上下文，设置自定义算子结构体，完成结构体的初始化,预处理,推理,销毁各个阶段的回调函数实现,其中推理回调函数是必须客户填充, 最后, 调用自定义算子API注册四个回调函数和op信息
+6. 上板调试：回调函数调试通过后，编译运行，开启模型详细日志和Dump功能确认完整模型的正确性
+7. 精度分析：若用户需要对包含自定义算子的模型做连板精度分析，首先将自定义算子的回调函数实现代码编译成so后，放在指定的路径，并重启rknn_server。最后，使用Toolkit2接口查看结果。
 
 
 ## C API处理
 
-在得到带自定义算子的rknn模型后，开始调用C API部署。首先，自定义算子的结构体和接口位于rknn_custom_op.h头文件，开发者程序需要包含该头文件。注册使用自定义算子的流程如下图所示：
+在得到带自定义算子的rknn模型后，开始调用C API部署。首先，自定义算子的结构体和接口位于rknn_custom_op.h头文件，开发者程序编译时需要包含该头文件。注册使用自定义算子的流程如下图所示：
 
 ![](../../images/custom_op_c_api_call_process.jpg)
 
@@ -26,7 +28,92 @@
 - cl_kernel_name/cl_file_name/cl_build_options：在注册GPU算子时必须配置，它们分别表示客户OpenCL代码文件和核函数名，以及编译选项，以字符串形式传入。若是CPU算子，则无须配置
 - init,compute, compute_native, prepare和destroy均是函数指针，要开发者实现该函数实体后，设置给rknn_custom_op结构体相应的函数指针
 
-### 2. 创建自定义算子实现
+#### 插件库方式初始化自定义算子结构体
+由于连板调试时，rknn_server会采用dlopen的方式从特定目录打开用户编译好的自定义算子插件库来获取算子信息，因此，对于插件库方式注册自定义算子，要求用户必须实现一个名为get_rknn_custom_op的函数，示例如下：
+```
+/**
+ * To obtain operator information to be registered, a plugin library must have one and only one of this function.
+*/
+rknn_custom_op* get_rknn_custom_op()
+{
+  int8_t use_native_dtype = 0;
+
+  // register a custom op
+  memset(&user_op, 0, sizeof(rknn_custom_op));
+  strncpy(user_op.op_type, "cstSoftmax", RKNN_MAX_NAME_LEN - 1);
+  user_op.version = 1;
+  user_op.target  = RKNN_TARGET_TYPE_CPU;
+  user_op.init    = custom_op_init_callback;
+  if (use_native_dtype == 0) {
+    user_op.compute = compute_custom_softmax_float32;
+  } else {
+    user_op.compute_native = compute_custom_relu_use_native_dtype;
+  }
+  user_op.destroy = custom_op_destroy_callback;
+  return &user_op;
+}
+```
+用户代码调用dlopen获取特定目录的所有so库文件句柄，再使用dlsym函数获取get_rknn_custom_op函数指针，调用该函数指针即可获取自定义算子结构体，这是rknn_server的打开方式，示例代码如下：
+```
+  const char* default_plugin_path =
+#if defined(__ANDROID__)
+#  if defined(__aarch64__)
+    "/vendor/lib64/rknpu/op_plugins";
+#  else
+    "/vendor/lib/rknpu/op_plugins";
+#  endif // __aarch64__
+#elif defined(__linux__)
+    "/usr/lib/rknpu/op_plugins/";
+#endif
+  std::vector<std::string> so_paths = get_plugin_so(default_plugin_path);
+  std::vector<void*>       so_handles;
+  for (auto path : so_paths) {
+    printf("load plugin %s\n", path.c_str());
+    void* plugin_lib = dlopen(path.c_str(), RTLD_NOW);
+    if (plugin_lib == NULL) {
+      printf("load plugin %s fail\n", path.c_str());
+      continue;
+    }
+
+    char* error = dlerror();
+    if (error != NULL) {
+      fprintf(stderr, "try to dlopen %s fail: %s\n", path.c_str(), error);
+      dlclose(plugin_lib);
+      return -1;
+    }
+    printf("dlopen %s successfully!\n", path.c_str());
+    get_custom_op_func custom_op_func = (get_custom_op_func)dlsym(plugin_lib, "get_rknn_custom_op");
+    error                             = dlerror();
+    if (error != NULL) {
+      fprintf(stderr, "dlsym fail: %s\n", error);
+      dlclose(plugin_lib);
+      return -1;
+    }
+
+    rknn_custom_op* user_op = custom_op_func();
+
+    so_handles.push_back(plugin_lib);
+  }
+```
+
+除此之外，插件库需要满足以下要求：
+- 包含自定义算子rknn_custom_op回调函数的实现
+- 如果是C++代码实现的插件库，C接口中为了正确打开函数符号，要在函数定义前后加入如下宏：
+```
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+//code
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
+````
+
+
+
+### 2. 增加自定义算子回调函数实现
 
 - init和destroy回调执行一次,分别在rknn_register_custom_op和rknn_destory中执行。
 - init,prepare和destroy回调函数为可选实现, compute和compute_native回调函数开发者必须实现其中一个。
@@ -314,3 +401,10 @@ void relu_destroy_callback_gpu(rknn_custom_op_context* op_ctx)
 
 ### 4. 模型推理
 在注册完所有算子后，可以使用通用API或零拷贝API流程完成推理
+
+### 5. 连板精度分析
+若用户需要对包含自定义算子的模型做连板精度分析，具体步骤如下：
+1. 实现一个get_rknn_custom_op函数和必须的回调函数，并编译成对应系统的库，编译的插件库名称可以任意，但必须以.so为后缀，例如，库名是librelu_rk.so
+2. 插件放到/vendor/lib64/rknpu/op_plugins（Android）或/usr/lib/rknpu/op_plugins（Linux）
+3. rknn_server支持通过环境变量修改plugin库的路径,环境变量是RKNN_OP_PLUGIN_PATH,变量值是plugin库的全路径，例如：export RKNN_OP_PLUGIN_PATH=/data/rknpu/op_plugins。设置完重启rknn_server服务后生效。
+4. PC端使用RKNN-Toolkit2的Python接口执行连板精度分析。
