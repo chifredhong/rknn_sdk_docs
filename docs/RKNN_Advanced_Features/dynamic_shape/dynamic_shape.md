@@ -221,6 +221,172 @@ dynamic_input中的shape与原始模型框架的layout一致，例如，对于�
 
 ![](../../images/dynamic_shape_zero_copy_api.png)
 
+初始化、查询RKNN模型支持的输入形状组合、设置输入形状使用与上述通用API相同，此处不做赘述。不同之处在于，在设置输入形状后，使用的接口不同。零拷贝推理C代码示例如下：
+
+```
+    // 创建最大的输入tensor内存
+    rknn_tensor_mem *input_mems[io_num.n_input];
+    for (int i = 0; i < io_num.n_input; i++)
+    {
+        // default input type is int8 (normalize and quantize need compute in outside)
+        // if set uint8, will fuse normalize and quantize to npu
+        input_attrs[i].type = RKNN_TENSOR_UINT8;
+        // default fmt is NHWC, npu only support NHWC in zero copy mode
+        input_attrs[i].fmt = RKNN_TENSOR_NHWC;
+
+        input_mems[i] = rknn_create_mem(ctx, input_attrs[i].size_with_stride);
+    }
+
+    // 创建最大的输出tensor内存
+    rknn_tensor_mem *output_mems[io_num.n_output];
+    for (uint32_t i = 0; i < io_num.n_output; ++i)
+    {
+        // default output type is depend on model, this require float32 to compute top5
+        // allocate float32 output tensor
+        int output_size = output_attrs[i].size * sizeof(float);
+        output_mems[i] = rknn_create_mem(ctx, output_size);
+    }
+
+    // 加载输入并设置模型输入形状，每次切换输入形状要调用一次
+    for (int s = 0; s < shape_num; ++s)
+    {
+        for (int i = 0; i < io_num.n_input; i++)
+        {
+            for (int j = 0; j < input_attrs[i].n_dims; ++j)
+            {
+                input_attrs[i].dims[j] = shape_range[i].dyn_range[s][j];
+            }
+        }
+        ret = rknn_set_input_shapes(ctx, io_num.n_input, input_attrs);
+        if (ret < 0)
+        {
+            fprintf(stderr, "rknn_set_input_shape error! ret=%d\n", ret);
+            return -1;
+        }
+
+        // 获取当前次推理的输入和输出形状
+        printf("current input tensors:\n");
+        rknn_tensor_attr cur_input_attrs[io_num.n_input];
+        memset(cur_input_attrs, 0, io_num.n_input * sizeof(rknn_tensor_attr));
+        for (uint32_t i = 0; i < io_num.n_input; i++)
+        {
+            cur_input_attrs[i].index = i;
+            // query info
+            ret = rknn_query(ctx, RKNN_QUERY_CURRENT_INPUT_ATTR, &(cur_input_attrs[i]), sizeof(rknn_tensor_attr));
+            if (ret < 0)
+            {
+                printf("rknn_init error! ret=%d\n", ret);
+                return -1;
+            }
+            dump_tensor_attr(&cur_input_attrs[i]);
+        }
+
+        printf("current output tensors:\n");
+        rknn_tensor_attr cur_output_attrs[io_num.n_output];
+        memset(cur_output_attrs, 0, io_num.n_output * sizeof(rknn_tensor_attr));
+        for (uint32_t i = 0; i < io_num.n_output; i++)
+        {
+            cur_output_attrs[i].index = i;
+            // query info
+            ret = rknn_query(ctx, RKNN_QUERY_CURRENT_OUTPUT_ATTR, &(cur_output_attrs[i]), sizeof(rknn_tensor_attr));
+            if (ret != RKNN_SUCC)
+            {
+                printf("rknn_query fail! ret=%d\n", ret);
+                return -1;
+            }
+            dump_tensor_attr(&cur_output_attrs[i]);
+        }
+
+        // 指定NPU核心数量，仅3588支持
+        rknn_set_core_mask(ctx, (rknn_core_mask)core_mask);
+
+        // 设置输入信息
+        rknn_input inputs[io_num.n_input];
+        memset(inputs, 0, io_num.n_input * sizeof(rknn_input));
+        std::vector<cv::Mat> resize_imgs;
+        resize_imgs.resize(io_num.n_input);
+        for (int i = 0; i < io_num.n_input; i++)
+        {
+            int height = cur_input_attrs[i].fmt == RKNN_TENSOR_NHWC ? cur_input_attrs[i].dims[1] : cur_input_attrs[i].dims[2];
+            int width = cur_input_attrs[i].fmt == RKNN_TENSOR_NHWC ? cur_input_attrs[i].dims[2] : cur_input_attrs[i].dims[3];
+            int stride = cur_input_attrs[i].w_stride;
+            cv::resize(imgs[i], resize_imgs[i], cv::Size(width, height));
+            int input_size = resize_imgs[i].total() * resize_imgs[i].channels();
+            // 拷贝外部数据到零拷贝输入缓冲区
+            if (width == stride)
+            {
+                memcpy(input_mems[i]->virt_addr, resize_imgs[i].data, input_size);
+            }
+            else
+            {
+                int height = cur_input_attrs[i].dims[1];
+                int channel = cur_input_attrs[i].dims[3];
+                // copy from src to dst with stride
+                uint8_t *src_ptr = resize_imgs[i].data;
+                uint8_t *dst_ptr = (uint8_t *)input_mems[i]->virt_addr;
+                // width-channel elements
+                int src_wc_elems = width * channel;
+                int dst_wc_elems = stride * channel;
+                for (int b = 0; b < cur_input_attrs[i].dims[0]; b++)
+                {
+                    for (int h = 0; h < height; ++h)
+                    {
+                        memcpy(dst_ptr, src_ptr, src_wc_elems);
+                        src_ptr += src_wc_elems;
+                        dst_ptr += dst_wc_elems;
+                    }
+                }
+            }
+        }
+
+        // 更新输入零拷贝缓冲区内存
+        for (int i = 0; i < io_num.n_input; i++)
+        {
+            cur_input_attrs[i].type = RKNN_TENSOR_UINT8;
+            ret = rknn_set_io_mem(ctx, input_mems[i], &cur_input_attrs[i]);
+            if (ret < 0)
+            {
+                printf("rknn_set_io_mem fail! ret=%d\n", ret);
+                return -1;
+            }
+        }
+
+        // 更新输出零拷贝缓冲区内存
+        for (uint32_t i = 0; i < io_num.n_output; ++i)
+        {
+            // default output type is depend on model, this require float32 to compute top5
+            cur_output_attrs[i].type = RKNN_TENSOR_FLOAT32;
+            cur_output_attrs[i].fmt = RKNN_TENSOR_NCHW;
+            // set output memory and attribute
+            ret = rknn_set_io_mem(ctx, output_mems[i], &cur_output_attrs[i]);
+            if (ret < 0)
+            {
+                printf("rknn_set_io_mem fail! ret=%d\n", ret);
+                return -1;
+            }
+        }
+
+        // 进行推理
+        printf("Begin perf ...\n");
+        double total_time = 0;
+        for (int i = 0; i < loop_count; ++i)
+        {
+            int64_t start_us = getCurrentTimeUs();
+            ret = rknn_run(ctx, NULL);
+            int64_t elapse_us = getCurrentTimeUs() - start_us;
+            if (ret < 0)
+            {
+                printf("rknn run error %d\n", ret);
+                return -1;
+            }
+            total_time += elapse_us / 1000.f;
+            printf("%4d: Elapse Time = %.2fms, FPS = %.2f\n", i, elapse_us / 1000.f, 1000.f * 1000.f / elapse_us);
+        }
+        printf("Avg FPS = %.3f\n", loop_count * 1000.f / total_time);
+
+    }
+```
+
 - 注意事项：
 
 1. rknn_set_io_mem接口在动态shape情况下，输入buffer的形状和大小说明：
