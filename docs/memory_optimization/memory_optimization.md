@@ -42,7 +42,7 @@ rknn_set_internal_mem(ctx_b, internal_mem_b);
 int rknn_dup_context(rknn_context* context_in,rknn_context* context_out)
 ```
 其中，context_in是已初始化的上下文，而context_out是复用context_in的上下文。如下图所示，两个context的模型结构相同，有相同的图结构，因此可以复用上下文。
--
+
 ![](../images/dup_context.png)
 
 

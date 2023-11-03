@@ -68,6 +68,8 @@ RKNPU SDK Documentation
   :maxdepth: 1
   :caption: 内存占用优化
 
+  memory_optimization/memory_optimization
+
 .. toctree::
   :maxdepth: 1
   :caption: 模型设计建议

@@ -31,7 +31,7 @@
     # Pre-process config
     rknn.config(mean_values=[103.94, 116.78, 123.68], std_values=[58.82, 58.82, 58.82], quant_img_RGB2BGR=True, dynamic_input=dynamic_shapes)
 ```
-这段代码告诉RKNN-Toolkit2生成支持3个形状分别是[1,3,224,224]、[1,3,192,192]和[1,3,160,160]的动态shape rknn模型。
+上述接口配置会生成支持3个形状分别是[1,3,224,224]、[1,3,192,192]和[1,3,160,160]的动态shape rknn模型。
 
 dynamic_input中的shape与原始模型框架的layout一致，例如，对于相同的224x224大小的RGB图片做分类，TensorFlow/TFLite模型输入是[1,224,224,3]，而ONNX模型输入是[1,3,224,224]。
 
@@ -391,7 +391,7 @@ dynamic_input中的shape与原始模型框架的layout一致，例如，对于�
 
 1. rknn_set_io_mem接口在动态shape情况下，输入buffer的形状和大小说明：
 
-   - 初始化完成后和调用rknn_set_input_shapes接口前，rknn_query接口使用RKNN_QUERY_INPUT_ATTR和RKNN_QUERY_OUTPUT_ATTR查询输入和输出Tensor的形状通常是最大的，用户可以使用这两个命令获取的大小来分配输入和输出内存。若遇到多输入模型，部分输入的形状可能不是最大的，此时需要搜索支持的形状中最大的规格，并分配对应大小的输入和输出内存。
+   - 初始化完成后和调用rknn_set_input_shapes接口前，rknn_query接口使用RKNN_QUERY_INPUT_ATTR和RKNN_QUERY_OUTPUT_ATTR查询输入和输出Tensor的形状通常是最大的，用户可以使用这两个命令获取的大小来分配输入和输出内存。若遇到多输入模型，部分输入的形状可能不是最大的，此时需要搜索支持的形状中最大的规格，并分配最大的输入和输出内存。
 
    - 如果输入是非4维度，使用fmt=UNDEFINED，传递原始模型输入形状的buffer，大小则根据输入形状和type计算得到。
 
